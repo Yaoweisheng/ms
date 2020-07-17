@@ -9,4 +9,7 @@ public interface StockDAO {
 
     //根据商品id扣除库存
     int updateSale(Stock stock);
+
+    //添加商品
+    int addStock(Stock stock);
 }

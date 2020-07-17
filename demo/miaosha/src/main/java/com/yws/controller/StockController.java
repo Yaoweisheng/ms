@@ -1,15 +1,22 @@
 package com.yws.controller;
 
 import com.google.common.util.concurrent.RateLimiter;
+import com.yws.entity.KillInfo;
+import com.yws.entity.Stock;
 import com.yws.service.OrderService;
+import com.yws.service.StockService;
 import com.yws.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Date;
+import java.util.UUID;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 @RestController
@@ -22,6 +29,9 @@ public class StockController {
     private RabbitTemplate rabbitTemplate;
 
     @Autowired
+    private StockService stockService;
+
+    @Autowired
     private OrderService orderService;
 
     @Autowired
@@ -31,7 +41,7 @@ public class StockController {
     private RateLimiter rateLimiter = RateLimiter.create(40);
 
     //生成md5值的方法
-    @RequestMapping("md5")
+    @GetMapping("md5")
     public String getMd5(Integer id, Integer userid) {
         String md5;
         try {
@@ -43,12 +53,30 @@ public class StockController {
         return "获取md5信息为: "+md5;
     }
 
+    //添加stock
+//    @PostMapping("addStock")
+//    public String addStock() {
+//        return null;
+//    }
+
 //    @RequestMapping("workmq")
 //    public String workmq(String str){
 //        String result = "work 模型: "+str;
 //        rabbitTemplate.convertAndSend("order", result);
 //        return result;
 //    }
+
+    //开发秒杀方法,使用乐观锁防止超卖
+    @GetMapping("addStock")
+    public String addStock(String name, Integer count){
+        try{
+            int stockId = stockService.addStock(name, count);
+            return "添加商品成功,商品id为"+stockId;
+        } catch (Exception e){
+            e.printStackTrace();
+            return e.getMessage();
+        }
+    }
 
     //开发秒杀方法,使用乐观锁防止超卖
     @GetMapping("kill")
@@ -78,6 +106,20 @@ public class StockController {
         }
     }
 
+    //开发秒杀方法,使用乐观锁防止超卖,消息队列异步处理订单
+    @GetMapping("killRedisMq")
+    public String killRedisMq(Integer id, Integer userid){
+        System.out.println("用户id = " + userid +" 秒杀的商品id = " + id);
+        try{
+            //根据秒杀商品id 去调用秒杀业务
+            orderService.killRedisMq(id, userid);
+            return "秒杀成功！！！";
+        } catch (Exception e){
+            e.printStackTrace();
+            return e.getMessage();
+        }
+    }
+
     //开发秒杀方法,乐观锁防止超卖+令牌桶算法限流
     @GetMapping("killtoken")
     public String killtoken(Integer id, Integer userid){
@@ -91,6 +133,40 @@ public class StockController {
             //根据秒杀商品id 去调用秒杀业务
             int orderId = orderService.kill(id, userid);
             return "秒杀成功，订单id为："+String.valueOf(orderId);
+        } catch (Exception e){
+            e.printStackTrace();
+            return e.getMessage();
+        }
+    }
+
+    //开发秒杀方法,乐观锁防止超卖+消息队列限流
+    @GetMapping("killLimitByMq")
+    public String killLimitByMq(Integer id, Integer userid){
+        System.out.println("秒杀是商品的id = " + id);
+        try{
+            //秒杀信息放入消息队列中
+            KillInfo killInfo = new KillInfo(UUID.randomUUID().toString(), id, userid);
+            Future<Boolean> result = orderService.killInMq(killInfo);
+            return result.get(10, TimeUnit.SECONDS) ? "秒杀成功!!!":"抢购失败，当前秒杀活动过于火爆，请重试！";
+        } catch (Exception e){
+            e.printStackTrace();
+            return "抢购失败，当前秒杀活动过于火爆，请重试！";
+        }
+    }
+
+    //开发秒杀方法,乐观锁防止超卖+令牌桶算法限流+消息队列异步处理订单
+    @GetMapping("killtokenMq")
+    public String killtokenMq(Integer id, Integer userid){
+        System.out.println("秒杀是商品的id = " + id);
+        //加入令牌桶的限流措施
+        if(!rateLimiter.tryAcquire(2, TimeUnit.SECONDS)){
+            log.info("抢购失败，当前秒杀活动过于火爆，请重试！");
+            return "抢购失败，当前秒杀活动过于火爆，请重试！";
+        }
+        try{
+            //根据秒杀商品id 去调用秒杀业务
+            orderService.killMq(id, userid);
+            return "秒杀成功!!!";
         } catch (Exception e){
             e.printStackTrace();
             return e.getMessage();
@@ -166,7 +242,7 @@ public class StockController {
                 return "购买失败，超过频率限制!";
             }
             //根据秒杀商品id 去调用秒杀业务
-            orderService.killbyMq(id, userid, md5);
+            orderService.killMq(id, userid, md5);
             return "秒杀成功！！！";
         } catch (Exception e){
             e.printStackTrace();

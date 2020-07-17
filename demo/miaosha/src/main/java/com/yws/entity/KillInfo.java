@@ -5,19 +5,17 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.Accessors;
+import org.springframework.context.annotation.Bean;
 
 import java.io.Serializable;
-import java.util.Date;
 
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 @ToString
 @Accessors(chain = true)
-public class Order {
-    private Integer id;
-    private Integer sid;
-    private Integer uid;
-    private String name;
-    private Date createDate;
+public class KillInfo {
+    private String id;
+    private int stockId;
+    private int userId;
 }
