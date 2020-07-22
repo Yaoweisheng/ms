@@ -6,4 +6,16 @@
         insert into stock_order values (#{id}, #{sid}, #{uid}, #{name}, #{createDate})
     </insert>
 
+    <!-- 创建订单 -->
+    <insert id="createOrderNX" parameterType="Order" useGeneratedKeys="true" keyProperty="id">
+        insert into stock_order
+        select distinct #{id}, #{sid}, #{uid}, #{name}, #{createDate}, #{msgid} from stock_order
+        where not exists (select id from stock_order where msgid = #{msgid})
+    </insert>
+
+    <!-- 查询是否存在 -->
+    <select id="existMsgid" parameterType="string" resultType="java.lang.Integer">
+        select count(1) from stock_order where msgid = #{msgid}
+    </select>
+
 </mapper>

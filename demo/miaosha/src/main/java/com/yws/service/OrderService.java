@@ -30,6 +30,12 @@ public interface OrderService {
     //创建订单方法
     boolean createOrder(Order order);
 
+    //创建订单方法
+    boolean createOrderNX(Order order);
+
+    //创建订单方法
+    boolean existMsgId(String id);
+
     //生成md5签名
     String getMd5(Integer id, Integer userid);
 

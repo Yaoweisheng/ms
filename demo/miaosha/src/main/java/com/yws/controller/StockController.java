@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -76,6 +77,28 @@ public class StockController {
             e.printStackTrace();
             return e.getMessage();
         }
+    }
+
+
+    //开发秒杀方法,使用乐观锁防止超卖
+    @GetMapping("getStock")
+    public List<Stock> getStock(String name){
+        try{
+            return stockService.getStock(name);
+        } catch (Exception e){
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    @GetMapping("transactionTest")
+    public int transactionTest(){
+        try {
+            return stockService.transactionTest();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return -1;
     }
 
     //开发秒杀方法,使用乐观锁防止超卖

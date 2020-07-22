@@ -2,6 +2,8 @@ package com.yws.dao;
 
 import com.yws.entity.Stock;
 
+import java.util.List;
+
 public interface StockDAO {
 
     //根据商品id查询库存信息的方法
@@ -12,4 +14,6 @@ public interface StockDAO {
 
     //添加商品
     int addStock(Stock stock);
+
+    List<Stock> getStock(String name);
 }

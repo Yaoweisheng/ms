@@ -1,5 +1,7 @@
 package com.yws.service.impl;
 
+import com.yws.annotation.Cache;
+import com.yws.annotation.InValidMethod;
 import com.yws.dao.StockDAO;
 import com.yws.entity.Stock;
 import com.yws.service.StockService;
@@ -9,6 +11,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 @Service
 @Transactional
@@ -24,6 +28,7 @@ public class StockServiceImpl implements StockService {
     private StockDAO stockDAO;
 
     @Override
+    @Cache(cacheValid = Cache.CacheValid.INVALID, thisExpireMethods = {"getStock"}, otherExpireMethods = {@InValidMethod(inValidClass = OrderServiceImpl.class, methods = {"kill"})})
     public int addStock(String name, Integer count) {
         Stock stock = new Stock();
         stock.setName(name);
@@ -44,4 +49,30 @@ public class StockServiceImpl implements StockService {
         stringRedisTemplate.opsForValue().set(StockUtil.STOCK_FREQUENCY +stock.getId(), stockRedisFrequency+"");
         return stock.getId();
     }
+
+    @Override
+    @Cache(cacheValid = Cache.CacheValid.VALID, expireTime = 30)
+    public List<Stock> getStock(String name) {
+        return stockDAO.getStock(name);
+    }
+
+    @Override
+    public int transactionTest() throws Exception {
+        try{
+            Stock stock = new Stock();
+            stock.setName("transactionTest");
+            stock.setSale(0);
+            stock.setCount(100);
+            stock.setVersion(0);
+            stockDAO.addStock(stock);
+//        stringRedisTemplate.opsForValue().set("transactionTest", 0+"");
+            int i = 1/0;
+        }catch (Exception e){
+            e.printStackTrace();
+            throw new RuntimeException();
+        }
+        return 0;
+    }
+
+
 }

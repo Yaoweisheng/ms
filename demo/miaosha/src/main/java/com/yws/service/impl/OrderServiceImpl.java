@@ -188,6 +188,21 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    public boolean createOrderNX(Order order) {
+        //校验库存
+        Stock stock = checkStock(order.getSid());
+        //扣除库存
+        updateSale(stock);
+        //生成订单
+        return orderDAO.createOrderNX(order) > 0;
+    }
+
+    @Override
+    public boolean existMsgId(String id) {
+        return orderDAO.existMsgid(id) > 0;
+    }
+
+    @Override
     public String getMd5(Integer id, Integer userid) {
         //检验用户的合法性
         User user = userDAO.findById(userid);
@@ -241,7 +256,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     //redis
-    private void stockInRedis(Integer id) throws JsonProcessingException {
+    private void stockInRedis(Integer id) {
         String clientId = UUID.randomUUID().toString();
         String freId = StockUtil.STOCK_FREQUENCY + id;
         String freStr = stringRedisTemplate.opsForValue().get(freId);
@@ -260,16 +275,16 @@ public class OrderServiceImpl implements OrderService {
             Integer num = Integer.valueOf(stringRedisTemplate.opsForValue().get(stockcId));
             if(num <= 0){
                 throw new RuntimeException("库存不足！！！");
-            };
+            }
             stringRedisTemplate.opsForValue().increment(stockcId,-1);
             stringRedisTemplate.opsForValue().increment(stockId, -1);
-            String msgJson = objectMapper.writeValueAsString(id);
-            Message message = MessageBuilder
-                    .withBody(msgJson.getBytes())
-                    .setContentType(MessageProperties.CONTENT_TYPE_JSON)
-                    .setMessageId(UUID.randomUUID().toString())
-                    .build();
-            rabbitTemplate.convertAndSend("addStock", message);
+//            String msgJson = objectMapper.writeValueAsString(id);
+//            Message message = MessageBuilder
+//                    .withBody(msgJson.getBytes())
+//                    .setContentType(MessageProperties.CONTENT_TYPE_JSON)
+//                    .setMessageId(UUID.randomUUID().toString())
+//                    .build();
+//            rabbitTemplate.convertAndSend("addStock", message);
         }catch (Exception e){
             throw e;
         }
@@ -301,42 +316,41 @@ public class OrderServiceImpl implements OrderService {
     //消息队列异步创建订单
     public void createOrderByMq(Stock stock, Integer userid) throws JsonProcessingException {
         Order order = new Order();
-        order.setSid(stock.getId()).setName(stock.getName()).setCreateDate(new Date()).setUid(userid);
+        String msgid = UUID.randomUUID().toString();
+        System.out.println(msgid);
+        order.setSid(stock.getId()).setName(stock.getName()).setCreateDate(new Date()).setUid(userid).setMsgid(msgid);
 //        rabbitTemplate.setMessageConverter(new Jackson2JsonMessageConverter());
 //        rabbitTemplate.convertAndSend("order", order);
         String msgJson = objectMapper.writeValueAsString(order);
         Message message = MessageBuilder
                 .withBody(msgJson.getBytes())
                 .setContentType(MessageProperties.CONTENT_TYPE_JSON)
-                .setMessageId(UUID.randomUUID().toString())
+                .setMessageId(msgid)
                 .build();
         rabbitTemplate.convertAndSend("order", message);
     }
 
-    //消息队列异步创建订单
-    public void createOrderByMqNoRepeated(Stock stock, Integer userid){
-        Order order = new Order();
-        order.setSid(stock.getId()).setName(stock.getName()).setCreateDate(new Date()).setUid(userid);
-        CorrelationData correlationData = new CorrelationData(UUID.randomUUID().toString());
-        rabbitTemplate.convertAndSend("orderNoRepeated", order);
-    }
-
     //订单消费者
     @RabbitListener(queuesToDeclare = @Queue("order"))
-    public void orderNoRepeatedReceive1(Channel channel, Message message) throws IOException {
+    public void orderNoRepeatedReceive1(Channel channel, Message message) throws Exception {
         try {
             String msgId = message.getMessageProperties().getMessageId();
             Order order = objectMapper.readValue(message.getBody(), Order.class);
 //            Order order = (Order) SerializationUtils.deserialize(message.getBody());
-            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
+//            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
+//                // 消息即将重复消费，直接确认消费，返回
+//                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+//                return;
+//            }
+            if(existMsgId(msgId)){
                 // 消息即将重复消费，直接确认消费，返回
                 channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
                 return;
             }
-            if(createOrder(order)){
-                stringRedisTemplate.opsForSet().add("msgIds", msgId);
-                stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
-                System.out.println("message1.order= "+order.getId());
+            if(createOrderNX(order)){
+//                stringRedisTemplate.opsForSet().add("msgIds", msgId);
+//                stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
+//                System.out.println("message1.order= "+order.getId());
                 // 业务处理成功后调用，消息会被确认消费
                 channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
             } else{
@@ -347,25 +361,31 @@ public class OrderServiceImpl implements OrderService {
         } catch (Exception e) {
             channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
             e.printStackTrace();
+            throw new RuntimeException();//抛出运行时异常保证@Transactional执行
         }
     }
     //订单消费者
     @RabbitListener(queuesToDeclare = @Queue("order"))
-    public void orderNoRepeatedReceive2(Channel channel, Message message) throws IOException {
+    public void orderNoRepeatedReceive2(Channel channel, Message message) throws Exception {
 //        Message message = correlationData.getReturnedMessage();
         try {
             String msgId = message.getMessageProperties().getMessageId();
             Order order = objectMapper.readValue(message.getBody(), Order.class);
 //            Order order = (Order) SerializationUtils.deserialize(message.getBody());
-            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
+//            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
+//                // 消息即将重复消费，直接确认消费，返回
+//                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+//                return;
+//            }
+            if(existMsgId(msgId)){
                 // 消息即将重复消费，直接确认消费，返回
                 channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
                 return;
             }
-            if(createOrder(order)){
-                stringRedisTemplate.opsForSet().add("msgIds", msgId);
-                stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
-                System.out.println("message2.order= "+order.getId());
+            if(createOrderNX(order)){
+//                stringRedisTemplate.opsForSet().add("msgIds", msgId);
+//                stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
+//                System.out.println("message2.order= "+order.getId());
                 // 业务处理成功后调用，消息会被确认消费
                 channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
             } else{
@@ -376,36 +396,37 @@ public class OrderServiceImpl implements OrderService {
         } catch (Exception e) {
             channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
             e.printStackTrace();
+            throw new RuntimeException();//抛出运行时异常保证@Transactional执行
         }
     }
 
     //商品消费者
-    @RabbitListener(queuesToDeclare = @Queue("addStock"))
-    public void stockReceive1(Channel channel, Message message) throws IOException {
-        try {
-            String msgId = message.getMessageProperties().getMessageId();
-            Integer id = objectMapper.readValue(message.getBody(), Integer.class);
-
-            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
-                // 消息即将重复消费，直接确认消费，返回
-                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-                return;
-            }
-
-            //校验库存
-            Stock stock = checkStock(id);
-            //扣除库存
-            updateSale(stock);
-
-            stringRedisTemplate.opsForSet().add("msgIds", msgId);
-            stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
-            System.out.println("message1.stockid= "+stock.getId()+","+"sale="+stock.getSale());
-            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-        } catch (IOException e) {
-            channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
-            e.printStackTrace();
-        }
-    }
+//    @RabbitListener(queuesToDeclare = @Queue("addStock"))
+//    public void stockReceive1(Channel channel, Message message) throws IOException {
+//        try {
+//            String msgId = message.getMessageProperties().getMessageId();
+//            Integer id = objectMapper.readValue(message.getBody(), Integer.class);
+//
+////            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
+////                // 消息即将重复消费，直接确认消费，返回
+////                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+////                return;
+////            }
+//
+//            //校验库存
+//            Stock stock = checkStock(id);
+//            //扣除库存
+//            updateSale(stock);
+//
+//            stringRedisTemplate.opsForSet().add("msgIds", msgId);
+//            stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
+//            System.out.println("message1.stockid= "+stock.getId()+","+"sale="+stock.getSale());
+//            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+//        } catch (IOException e) {
+//            channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
+//            e.printStackTrace();
+//        }
+//    }
 
 
     //秒杀消费者

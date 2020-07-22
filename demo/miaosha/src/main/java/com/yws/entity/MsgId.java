@@ -6,19 +6,11 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.Accessors;
 
-import java.io.Serializable;
-import java.util.Date;
-
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 @ToString
 @Accessors(chain = true)
-public class Order {
-    private Integer id;
-    private Integer sid;
-    private Integer uid;
-    private String name;
-    private Date createDate;
-    private String msgid;
+public class MsgId {
+    String id;
 }

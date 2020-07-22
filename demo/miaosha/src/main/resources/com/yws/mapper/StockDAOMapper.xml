@@ -6,7 +6,14 @@
         select id, name, count, sale, version from stock
         where id = #{id}
     </select>
-    
+    <select id="getStock" resultType="Stock">
+        select id, name, count, sale, version from stock
+        where 1 = 1
+        <if test="name != null and name != ''">
+            and name like concat(#{name}, '%')
+        </if>
+    </select>
+
     <!-- 根据商品id扣除库存 -->
     <update id="updateSale" parameterType="Stock">
         update stock set sale=sale+1, version = version+1 where id = #{id} and version = #{version}
