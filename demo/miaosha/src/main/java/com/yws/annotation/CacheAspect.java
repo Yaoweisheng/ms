@@ -6,6 +6,8 @@ import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -27,6 +29,9 @@ public class CacheAspect {
     @Autowired
     private RedisTemplate<String, Object> objectRedisTemplate;
 
+    @Autowired
+    private RedissonClient redissonClient;
+
     @Pointcut("@annotation(Cache)")
     public void cachePointCut(){};
 
@@ -39,29 +44,58 @@ public class CacheAspect {
         String methodName = joinPoint.getSignature().getName();
         StringBuilder args = new StringBuilder();
         for (int i = 0; i < joinPoint.getArgs().length; i++) {
-            args.append(i + joinPoint.getArgs()[i].toString()+";");
+            args.append(i + joinPoint.getArgs()[i].toString() + ";");
         }
         String key = targetClass + ":" + methodName + ":" + args;
+
+        RLock lock = redissonClient.getLock("RedissonLock");
 
         Method method = ((MethodSignature) signature).getMethod();
         Method methodWithAnnotations = joinPoint.getTarget().getClass().getDeclaredMethod(method.getName(), method.getParameterTypes());
         Cache cache = methodWithAnnotations.getDeclaredAnnotation(Cache.class);
 
+//        switch (cache.cacheValid()) {
+//            case VALID:
+//                if (stringRedisTemplate.hasKey(key)) {
+//                    //读缓存
+//                    return readCache(cache, key);
+//                }
+//                synchronized (stringRedisTemplate) {
+//                    if (stringRedisTemplate.hasKey(key)) {
+//                        //读缓存
+//                        return readCache(cache, key);
+//                    }
+//                    Object proceed = joinPoint.proceed();
+//                    //写缓存
+//                    writeCache(cache, key, proceed);
+//                    return proceed;
+//                }
+//            case INVALID:
+//                Object proceed1 = joinPoint.proceed();
+//                //缓存失效
+//                invalidCache(cache, targetClass);
+//                return proceed1;
+//        }
+//        return null;
+//    }
         switch (cache.cacheValid()){
             case VALID:
                 if(stringRedisTemplate.hasKey(key)){
                     //读缓存
                     return readCache(cache, key);
                 }
-                synchronized (stringRedisTemplate){
-                    if(stringRedisTemplate.hasKey(key)) {
-                        //读缓存
-                        return readCache(cache, key);
+                try{
+                    boolean res = lock.tryLock(1,1,TimeUnit.SECONDS);
+                    if(res){
+                        Object proceed = joinPoint.proceed();
+                        //写缓存
+                        writeCache(cache, key, proceed);
+                        return proceed;
                     }
-                    Object proceed = joinPoint.proceed();
-                    //写缓存
-                    writeCache(cache, key, proceed);
-                    return proceed;
+                }catch (Exception e){
+                    throw e;
+                }finally {
+                    lock.unlock();
                 }
             case INVALID:
                 Object proceed1 = joinPoint.proceed();
