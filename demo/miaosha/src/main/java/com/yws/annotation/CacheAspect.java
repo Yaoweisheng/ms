@@ -85,7 +85,7 @@ public class CacheAspect {
                     return readCache(cache, key);
                 }
                 try{
-                    boolean res = lock.tryLock(1,1,TimeUnit.SECONDS);
+                    boolean res = lock.tryLock(1,1,TimeUnit.MINUTES);
                     if(res){
                         Object proceed = joinPoint.proceed();
                         //写缓存

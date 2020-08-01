@@ -15,6 +15,7 @@ import com.yws.entity.Stock;
 import com.yws.entity.User;
 import com.yws.service.OrderService;
 import com.yws.utils.GlobalThreadMap;
+import com.yws.utils.MqConstant;
 import com.yws.utils.StockUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.Message;
@@ -35,6 +36,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.DigestUtils;
 
+import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
@@ -57,7 +59,6 @@ public class OrderServiceImpl implements OrderService {
 
     @Autowired
     private UserDAO userDAO;
-
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -188,13 +189,23 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public boolean createOrderNX(Order order) {
+    public boolean createOrderNX(Order order) throws JsonProcessingException {
         //校验库存
         Stock stock = checkStock(order.getSid());
         //扣除库存
-        updateSale(stock);
+        int updateSale = stockDAO.updateSale(stock);
+        //乐观锁更新失败，自旋尝试多次更新
+        while(updateSale == 0){
+            stock = checkStock(order.getSid());
+            updateSale = stockDAO.updateSale(stock);
+        }
         //生成订单
-        return orderDAO.createOrderNX(order) > 0;
+        if(orderDAO.createOrderNX(order) > 0){
+            //TODO 定时实现30分钟未付款取消订单
+            //cancel(order.getId());
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -244,7 +255,6 @@ public class OrderServiceImpl implements OrderService {
             }
         });
     }
-
 
     //校验库存
     private Stock checkStock(Integer id){
@@ -308,7 +318,7 @@ public class OrderServiceImpl implements OrderService {
     //创建订单
     public Integer createOrder(Stock stock, Integer userid){
         Order order = new Order();
-        order.setSid(stock.getId()).setName(stock.getName()).setCreateDate(new Date()).setUid(userid);
+        order.setSid(stock.getId()).setName(stock.getName()).setCreateTime(new Date()).setUid(userid);
         orderDAO.createOrder(order);
         return order.getId();
     }
@@ -318,7 +328,7 @@ public class OrderServiceImpl implements OrderService {
         Order order = new Order();
         String msgid = UUID.randomUUID().toString();
         System.out.println(msgid);
-        order.setSid(stock.getId()).setName(stock.getName()).setCreateDate(new Date()).setUid(userid).setMsgid(msgid);
+        order.setSid(stock.getId()).setName(stock.getName()).setCreateTime(new Date()).setUid(userid).setMsgid(msgid);
 //        rabbitTemplate.setMessageConverter(new Jackson2JsonMessageConverter());
 //        rabbitTemplate.convertAndSend("order", order);
         String msgJson = objectMapper.writeValueAsString(order);
@@ -327,192 +337,35 @@ public class OrderServiceImpl implements OrderService {
                 .setContentType(MessageProperties.CONTENT_TYPE_JSON)
                 .setMessageId(msgid)
                 .build();
-        rabbitTemplate.convertAndSend("order", message);
+        rabbitTemplate.convertAndSend(MqConstant.QUEUE_ORDER, message);
     }
 
-    //订单消费者
-    @RabbitListener(queuesToDeclare = @Queue("order"))
-    public void orderNoRepeatedReceive1(Channel channel, Message message) throws Exception {
-        try {
-            String msgId = message.getMessageProperties().getMessageId();
-            Order order = objectMapper.readValue(message.getBody(), Order.class);
-//            Order order = (Order) SerializationUtils.deserialize(message.getBody());
-//            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
-//                // 消息即将重复消费，直接确认消费，返回
-//                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-//                return;
-//            }
-            if(existMsgId(msgId)){
-                // 消息即将重复消费，直接确认消费，返回
-                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-                return;
+
+    @Override
+    public List<Order> getUnpaidOrder(Integer uid, Integer page, Integer per){
+        return orderDAO.getOrder(null, null, uid, null, null, null, 0, (page-1)*per, per);
+    }
+
+    @Override
+    public int getUnpaidOrderCount(Integer uid){
+        return orderDAO.getOrderCount(null, null, uid, null, null, null, 0);
+    }
+
+    @Override
+    public boolean pay(Integer id) {
+        return orderDAO.updateState(id, 1, 0) > 0;
+    }
+
+    @Override
+    public boolean cancel(Integer id) {
+        if(orderDAO.updateState(id, 2, 0) > 0){
+            Stock stock = stockDAO.checkStock(id);
+            int restoreSale = stockDAO.restoreSale(stock);
+            while(restoreSale == 0){
+                restoreSale = stockDAO.restoreSale(stock);
             }
-            if(createOrderNX(order)){
-//                stringRedisTemplate.opsForSet().add("msgIds", msgId);
-//                stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
-//                System.out.println("message1.order= "+order.getId());
-                // 业务处理成功后调用，消息会被确认消费
-                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-            } else{
-                // 业务处理失败后调用
-                channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
-//                channel.basicReject(message.getMessageProperties().getDeliveryTag(), true);
-            }
-        } catch (Exception e) {
-            channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
-            e.printStackTrace();
-            throw new RuntimeException();//抛出运行时异常保证@Transactional执行
+            return true;
         }
+        return false;
     }
-    //订单消费者
-    @RabbitListener(queuesToDeclare = @Queue("order"))
-    public void orderNoRepeatedReceive2(Channel channel, Message message) throws Exception {
-//        Message message = correlationData.getReturnedMessage();
-        try {
-            String msgId = message.getMessageProperties().getMessageId();
-            Order order = objectMapper.readValue(message.getBody(), Order.class);
-//            Order order = (Order) SerializationUtils.deserialize(message.getBody());
-//            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
-//                // 消息即将重复消费，直接确认消费，返回
-//                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-//                return;
-//            }
-            if(existMsgId(msgId)){
-                // 消息即将重复消费，直接确认消费，返回
-                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-                return;
-            }
-            if(createOrderNX(order)){
-//                stringRedisTemplate.opsForSet().add("msgIds", msgId);
-//                stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
-//                System.out.println("message2.order= "+order.getId());
-                // 业务处理成功后调用，消息会被确认消费
-                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-            } else{
-                // 业务处理失败后调用
-                channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
-//                channel.basicReject(message.getMessageProperties().getDeliveryTag(), true);
-            }
-        } catch (Exception e) {
-            channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
-            e.printStackTrace();
-            throw new RuntimeException();//抛出运行时异常保证@Transactional执行
-        }
-    }
-
-    //商品消费者
-//    @RabbitListener(queuesToDeclare = @Queue("addStock"))
-//    public void stockReceive1(Channel channel, Message message) throws IOException {
-//        try {
-//            String msgId = message.getMessageProperties().getMessageId();
-//            Integer id = objectMapper.readValue(message.getBody(), Integer.class);
-//
-////            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
-////                // 消息即将重复消费，直接确认消费，返回
-////                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-////                return;
-////            }
-//
-//            //校验库存
-//            Stock stock = checkStock(id);
-//            //扣除库存
-//            updateSale(stock);
-//
-//            stringRedisTemplate.opsForSet().add("msgIds", msgId);
-//            stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
-//            System.out.println("message1.stockid= "+stock.getId()+","+"sale="+stock.getSale());
-//            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-//        } catch (IOException e) {
-//            channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
-//            e.printStackTrace();
-//        }
-//    }
-
-
-    //秒杀消费者
-    @RabbitListener(queuesToDeclare = @Queue(name = "kill", durable = "true", arguments = {@Argument(name = "x-max-length", value = "100", type = "java.lang.Integer")}))
-    public void killReceive1(Channel channel, Message message) throws IOException {
-        try {
-            String msgId = message.getMessageProperties().getMessageId();
-            KillInfo killInfo = objectMapper.readValue(message.getBody(), KillInfo.class);
-
-            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
-                // 消息即将重复消费，直接确认消费，返回
-                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-                return;
-            }
-//            KillInfo killInfo = (KillInfo) SerializationUtils.deserialize(message.getBody());
-
-            killRedisMq(killInfo.getStockId(), killInfo.getUserId());
-            stringRedisTemplate.opsForSet().add("killIds", killInfo.getId());
-            stringRedisTemplate.expire("killIds", 2, TimeUnit.MINUTES);
-
-            stringRedisTemplate.opsForSet().add("msgIds", msgId);
-            stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
-
-            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-        } catch (IOException e) {
-            channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, false);
-            e.printStackTrace();
-        }
-    }
-
-
-    //秒杀消费者
-    @RabbitListener(queuesToDeclare = @Queue(name = "kill", durable = "true", arguments = {@Argument(name = "x-max-length", value = "100", type = "java.lang.Integer")}))
-    public void killReceive2(Channel channel, Message message) throws IOException {
-        try {
-            String msgId = message.getMessageProperties().getMessageId();
-            KillInfo killInfo = objectMapper.readValue(message.getBody(), KillInfo.class);
-
-            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
-                // 消息即将重复消费，直接确认消费，返回
-                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-                return;
-            }
-//            KillInfo killInfo = (KillInfo) SerializationUtils.deserialize(message.getBody());
-
-            killRedisMq(killInfo.getStockId(), killInfo.getUserId());
-            stringRedisTemplate.opsForSet().add("killIds", killInfo.getId());
-            stringRedisTemplate.expire("killIds", 2, TimeUnit.MINUTES);
-
-            stringRedisTemplate.opsForSet().add("msgIds", msgId);
-            stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
-
-            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-        } catch (IOException e) {
-            channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, false);
-            e.printStackTrace();
-        }
-    }
-
-
-    //秒杀消费者
-    @RabbitListener(queuesToDeclare = @Queue(name = "kill", durable = "true", arguments = {@Argument(name = "x-max-length", value = "100", type = "java.lang.Integer")}))
-    public void killReceive3(Channel channel, Message message) throws IOException {
-        try {
-            String msgId = message.getMessageProperties().getMessageId();
-            KillInfo killInfo = objectMapper.readValue(message.getBody(), KillInfo.class);
-
-            if(stringRedisTemplate.hasKey("msgIds") && stringRedisTemplate.opsForSet().isMember("msgIds", msgId)){
-                // 消息即将重复消费，直接确认消费，返回
-                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-                return;
-            }
-//            KillInfo killInfo = (KillInfo) SerializationUtils.deserialize(message.getBody());
-
-            killRedisMq(killInfo.getStockId(), killInfo.getUserId());
-            stringRedisTemplate.opsForSet().add("killIds", killInfo.getId());
-            stringRedisTemplate.expire("killIds", 2, TimeUnit.MINUTES);
-
-            stringRedisTemplate.opsForSet().add("msgIds", msgId);
-            stringRedisTemplate.expire("msgIds", 2, TimeUnit.MINUTES);
-
-            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-        } catch (IOException e) {
-            channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, false);
-            e.printStackTrace();
-        }
-    }
-
 }

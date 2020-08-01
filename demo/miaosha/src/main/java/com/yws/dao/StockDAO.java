@@ -12,6 +12,9 @@ public interface StockDAO {
     //根据商品id扣除库存
     int updateSale(Stock stock);
 
+    //取消订单恢复商品销售量
+    int restoreSale(Stock stock);
+
     //添加商品
     int addStock(Stock stock);
 

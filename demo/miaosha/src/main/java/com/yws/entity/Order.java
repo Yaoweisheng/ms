@@ -19,6 +19,7 @@ public class Order {
     private Integer sid;
     private Integer uid;
     private String name;
-    private Date createDate;
+    private Date createTime;
     private String msgid;
+    private Integer state = 0;
 }

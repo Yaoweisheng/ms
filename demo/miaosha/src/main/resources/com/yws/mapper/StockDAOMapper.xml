@@ -19,6 +19,11 @@
         update stock set sale=sale+1, version = version+1 where id = #{id} and version = #{version}
     </update>
 
+    <!-- 根据商品id扣除库存 -->
+    <update id="restoreSale" parameterType="Stock">
+        update stock set sale=sale-1, version = version+1 where id = #{id} and version = #{version}
+    </update>
+
     <insert id="addStock" parameterType="Stock" useGeneratedKeys="true" keyProperty="id">
         insert into stock values (#{id},#{name},#{count},#{sale},#{version})
     </insert>

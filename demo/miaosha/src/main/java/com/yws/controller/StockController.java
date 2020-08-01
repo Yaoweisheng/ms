@@ -2,10 +2,13 @@ package com.yws.controller;
 
 import com.google.common.util.concurrent.RateLimiter;
 import com.yws.entity.KillInfo;
+import com.yws.entity.Order;
 import com.yws.entity.Stock;
 import com.yws.service.OrderService;
 import com.yws.service.StockService;
 import com.yws.service.UserService;
+import com.yws.utils.ObjectResult;
+import com.yws.utils.PagingObject;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
@@ -275,6 +278,28 @@ public class StockController {
         }
     }
 
+    @GetMapping("getUnpaidOrder")
+    public ObjectResult<PagingObject> getUnpaidOrder(Integer uid, Integer page, Integer per){
+        List<Order> unpaidOrder = orderService.getUnpaidOrder(uid, page, per);
+        int unpaidOrderCount = orderService.getUnpaidOrderCount(uid);
+        return ObjectResult.success(new PagingObject<>(unpaidOrder, unpaidOrderCount));
+    }
+
+    @GetMapping("pay")
+    public ObjectResult<Order> pay(Integer id){
+        if(orderService.pay(id)){
+            return ObjectResult.success("付款成功！");
+        }
+        return ObjectResult.error("付款失败！");
+    }
+
+    @GetMapping("cancel")
+    public ObjectResult<Order> cancel(Integer id){
+        if(orderService.cancel(id)){
+            return ObjectResult.success("订单已取消");
+        }
+        return ObjectResult.error("订单取消失败！");
+    }
 //    @GetMapping("sale")
 //    public String sale(Integer id){
 //        //1、没有获取到token请求一直直到获取到token令牌

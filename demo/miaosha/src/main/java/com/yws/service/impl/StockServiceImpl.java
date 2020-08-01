@@ -15,7 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 @Service
-@Transactional
 @Slf4j
 public class StockServiceImpl implements StockService {
 
@@ -27,6 +26,7 @@ public class StockServiceImpl implements StockService {
     @Autowired
     private StockDAO stockDAO;
 
+    @Transactional
     @Override
     @Cache(cacheValid = Cache.CacheValid.INVALID, thisExpireMethods = {"getStock"}, otherExpireMethods = {@InValidMethod(inValidClass = OrderServiceImpl.class, methods = {"kill"})})
     public int addStock(String name, Integer count) {
@@ -50,6 +50,7 @@ public class StockServiceImpl implements StockService {
         return stock.getId();
     }
 
+    @Transactional
     @Override
     @Cache(cacheValid = Cache.CacheValid.VALID, expireTime = 30)
     public List<Stock> getStock(String name) {
@@ -59,12 +60,7 @@ public class StockServiceImpl implements StockService {
     @Override
     public int transactionTest() throws Exception {
         try{
-            Stock stock = new Stock();
-            stock.setName("transactionTest");
-            stock.setSale(0);
-            stock.setCount(100);
-            stock.setVersion(0);
-            stockDAO.addStock(stock);
+            addStock("tranTest1", 150);
 //        stringRedisTemplate.opsForValue().set("transactionTest", 0+"");
             int i = 1/0;
         }catch (Exception e){

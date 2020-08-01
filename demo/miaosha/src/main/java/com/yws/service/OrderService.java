@@ -5,6 +5,7 @@ import com.yws.entity.KillInfo;
 import com.yws.entity.Order;
 import com.yws.entity.Stock;
 
+import java.util.List;
 import java.util.concurrent.Future;
 
 public interface OrderService {
@@ -31,7 +32,7 @@ public interface OrderService {
     boolean createOrder(Order order);
 
     //创建订单方法
-    boolean createOrderNX(Order order);
+    boolean createOrderNX(Order order) throws JsonProcessingException;
 
     //创建订单方法
     boolean existMsgId(String id);
@@ -40,4 +41,12 @@ public interface OrderService {
     String getMd5(Integer id, Integer userid);
 
     Future<Boolean> killInMq(KillInfo killInfo) throws JsonProcessingException;
+
+    List<Order> getUnpaidOrder(Integer uid, Integer page, Integer per);
+
+    int getUnpaidOrderCount(Integer uid);
+
+    boolean pay(Integer id);
+
+    boolean cancel(Integer id);
 }

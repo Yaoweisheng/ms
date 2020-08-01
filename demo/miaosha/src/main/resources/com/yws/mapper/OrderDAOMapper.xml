@@ -1,15 +1,25 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
 <mapper namespace="com.yws.dao.OrderDAO">
+
+    <resultMap type="Order" id="order">
+        <id property="id" column="id"/>
+        <result property="sid" column="sid"/>
+        <result property="uid" column="uid"/>
+        <result property="name" column="name"/>
+        <result property="createTime" column="create_time" jdbcType="TIMESTAMP"/>
+        <result property="msgid" column="msgid"/>
+        <result property="state" column="state"/>
+    </resultMap>
     <!-- 创建订单 -->
     <insert id="createOrder" parameterType="Order" useGeneratedKeys="true" keyProperty="id">
-        insert into stock_order values (#{id}, #{sid}, #{uid}, #{name}, #{createDate})
+        insert into stock_order values (#{id}, #{sid}, #{uid}, #{name}, #{createTime}, #{state})
     </insert>
 
     <!-- 创建订单 -->
     <insert id="createOrderNX" parameterType="Order" useGeneratedKeys="true" keyProperty="id">
         insert into stock_order
-        select distinct #{id}, #{sid}, #{uid}, #{name}, #{createDate}, #{msgid} from stock_order
+        select distinct #{id}, #{sid}, #{uid}, #{name}, #{createTime}, #{msgid}, #{state} from stock_order
         where not exists (select id from stock_order where msgid = #{msgid})
     </insert>
 
@@ -18,4 +28,57 @@
         select count(1) from stock_order where msgid = #{msgid}
     </select>
 
+    <select id="getOrder" parameterType="Order" resultMap="order">
+        select id, sid, uid, name, create_time, msgid, state from stock_order
+        where 1 = 1
+        <if test="id != null and id != ''">
+            and id = #{id}
+        </if>
+        <if test="sid != null and id != ''">
+            and sid = #{sid}
+        </if>
+        <if test="uid != null and uid != ''">
+            and uid = #{uid}
+        </if>
+        <if test="name != null and name != ''">
+            and name = #{name}
+        </if>
+        <if test="startTime != null and endTime != null">
+            and create_time &gt; #{startTime} and create_time $lt; #{endTime}
+        </if>
+        <if test="state != null">
+            and state = #{state}
+        </if>
+        order by create_time desc
+        limit #{limit}, #{offset}
+    </select>
+
+    <select id="getOrderCount" resultType="integer">
+        select count(1) from stock_order
+        where 1 = 1
+        <if test="id != null and id != ''">
+            and id = #{id}
+        </if>
+        <if test="sid != null and id != ''">
+            and sid = #{sid}
+        </if>
+        <if test="uid != null and uid != ''">
+            and uid = #{uid}
+        </if>
+        <if test="name != null and name != ''">
+            and name = #{name}
+        </if>
+        <if test="startTime != null and endTime != null">
+            and create_time &gt; #{startTime} and create_time $lt; #{endTime}
+        </if>
+        <if test="state != null">
+            and state = #{state}
+        </if>
+    </select>
+
+    <update id="updateState">
+        update stock_order
+        set state = #{state}
+        where id = #{id} and state = #{oldState}
+    </update>
 </mapper>
