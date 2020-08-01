@@ -201,11 +201,16 @@ public class OrderServiceImpl implements OrderService {
         }
         //生成订单
         if(orderDAO.createOrderNX(order) > 0){
-            //TODO 定时实现30分钟未付款取消订单
-            //cancel(order.getId());
+            //定时实现30分钟未付款取消订单
+            delayCencel();
             return true;
         }
         return false;
+    }
+
+    //TODO 定时实现30分钟未付款取消订单
+    private void delayCencel() {
+        //cancel(order.getId());
     }
 
     @Override
