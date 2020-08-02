@@ -2,10 +2,6 @@ package com.yws.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.ConnectionFactory;
-import com.sun.org.apache.xml.internal.resolver.readers.ExtendedXMLCatalogReader;
-import com.sun.org.apache.xpath.internal.operations.Or;
 import com.yws.dao.OrderDAO;
 import com.yws.dao.StockDAO;
 import com.yws.dao.UserDAO;
@@ -13,31 +9,24 @@ import com.yws.entity.KillInfo;
 import com.yws.entity.Order;
 import com.yws.entity.Stock;
 import com.yws.entity.User;
+import com.yws.mq.DLXMessage;
 import com.yws.service.OrderService;
 import com.yws.utils.GlobalThreadMap;
 import com.yws.utils.MqConstant;
 import com.yws.utils.StockUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;
+import org.springframework.amqp.core.MessagePostProcessor;
 import org.springframework.amqp.core.MessageProperties;
-import org.springframework.amqp.rabbit.annotation.Argument;
-import org.springframework.amqp.rabbit.annotation.Queue;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
-import org.springframework.amqp.support.converter.MessageConverter;
-import org.springframework.amqp.utils.SerializationUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Bean;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.DigestUtils;
 
-import javax.annotation.PostConstruct;
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -202,7 +191,7 @@ public class OrderServiceImpl implements OrderService {
         //生成订单
         if(orderDAO.createOrderNX(order) > 0){
             //定时实现30分钟未付款取消订单
-            delayCencel(order);
+            delayCencelByMq(order);
             return true;
         }
         return false;
@@ -210,6 +199,26 @@ public class OrderServiceImpl implements OrderService {
 
     //TODO 定时实现30分钟未付款取消订单
     private void delayCencel(Order order) {
+        //cancel(order.getId());
+    }
+
+    private void delayCencelByMq(Order order) throws JsonProcessingException {
+        String msgJson = objectMapper.writeValueAsString(order);
+        DLXMessage dlxMessage = new DLXMessage(MqConstant.DEFAULT_EXCHANGE, MqConstant.QUEUE_CANCEL, msgJson.getBytes(), 30*60*1000);
+        String msgJson0 = objectMapper.writeValueAsString(dlxMessage);
+        Message message0 = MessageBuilder
+                .withBody(msgJson0.getBytes())
+                .setContentType(MessageProperties.CONTENT_TYPE_JSON)
+                .build();
+
+        MessagePostProcessor processor = new MessagePostProcessor(){
+            @Override
+            public Message postProcessMessage(Message message) throws AmqpException {
+                message.getMessageProperties().setExpiration(dlxMessage.getTimes()+"");
+                return message;
+            }
+        };
+        rabbitTemplate.convertAndSend(MqConstant.DEFAULT_EXCHANGE, MqConstant.DEAD_LETTER_QUEUE, message0, processor);
         //cancel(order.getId());
     }
 
@@ -362,9 +371,14 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public boolean cancel(Integer id) {
-        if(orderDAO.updateState(id, 2, 0) > 0){
-            Stock stock = stockDAO.checkStock(id);
+    public boolean cancel(Integer id){
+        return cancel(orderDAO.getOrder(id,null,null,null,null,null,null,0,1).get(0));
+    }
+
+    @Override
+    public boolean cancel(Order order) {
+        if(orderDAO.updateState(order.getId(), 2, 0) > 0){
+            Stock stock = stockDAO.checkStock(order.getSid());
             int restoreSale = stockDAO.restoreSale(stock);
             while(restoreSale == 0){
                 restoreSale = stockDAO.restoreSale(stock);
@@ -372,5 +386,10 @@ public class OrderServiceImpl implements OrderService {
             return true;
         }
         return false;
+    }
+
+    @Override
+    public int getState(Integer id) {
+        return orderDAO.getState(id);
     }
 }

@@ -1,5 +1,6 @@
 package com.yws.config;
 
+import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.rabbit.annotation.RabbitListenerConfigurer;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
@@ -33,20 +34,25 @@ public class RabbitMQConfig implements RabbitListenerConfigurer {
     public MappingJackson2MessageConverter consumerJackson2MessageConverter() {
         return new MappingJackson2MessageConverter();
     }
-
+    @Bean
+    public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory) {
+        RabbitTemplate template = new RabbitTemplate(connectionFactory);
+        template.setMessageConverter(new Jackson2JsonMessageConverter());
+        return template;
+    }
     /**
      * 配置rabbitmq事务
      *
      * @param connectionFactory
      * @return
      */
-    @Bean("rabbitTransactionManager")
-    public RabbitTransactionManager rabbitTransactionManager(ConnectionFactory connectionFactory) {
-        return new RabbitTransactionManager(connectionFactory);
-    }
-
-    @Bean
-    public RabbitTemplate transactionRabbitTemplate(ConnectionFactory connectionFactory) {
-        return new RabbitTemplate(connectionFactory);
-    }
+//    @Bean("rabbitTransactionManager")
+//    public RabbitTransactionManager rabbitTransactionManager(ConnectionFactory connectionFactory) {
+//        return new RabbitTransactionManager(connectionFactory);
+//    }
+//
+//    @Bean
+//    public RabbitTemplate transactionRabbitTemplate(ConnectionFactory connectionFactory) {
+//        return new RabbitTemplate(connectionFactory);
+//    }
 }

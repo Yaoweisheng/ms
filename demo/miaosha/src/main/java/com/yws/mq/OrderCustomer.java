@@ -102,6 +102,27 @@ public class OrderCustomer {
         }
     }
 
+
+    //订单取消的消费者
+    @RabbitListener(queuesToDeclare = @Queue(MqConstant.QUEUE_CANCEL))
+    public void orderCancelReceive1(Channel channel, Message message) throws Exception {
+        try {
+            Order order = objectMapper.readValue(message.getBody(), Order.class);
+            if(orderService.getState(order.getId()) != 0){
+                // 消息即将重复消费，直接确认消费，返回
+                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+                return;
+            }
+            orderService.cancel(order);
+            // 业务处理成功后调用，消息会被确认消费
+            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+        } catch (Exception e) {
+            channel.basicNack(message.getMessageProperties().getDeliveryTag(),false, true);
+            e.printStackTrace();
+            throw new RuntimeException();//抛出运行时异常保证@Transactional执行
+        }
+    }
+
     //秒杀消费者
     @RabbitListener(queuesToDeclare = @Queue(name = "kill", durable = "true", arguments = {@Argument(name = "x-max-length", value = "100", type = "java.lang.Integer")}))
     public void killReceive1(Channel channel, Message message) throws IOException {

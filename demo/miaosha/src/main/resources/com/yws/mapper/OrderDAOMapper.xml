@@ -81,4 +81,9 @@
         set state = #{state}
         where id = #{id} and state = #{oldState}
     </update>
+
+    <select id="getState" resultType="integer">
+        select state from stock_order
+        where id = #{id}
+    </select>
 </mapper>

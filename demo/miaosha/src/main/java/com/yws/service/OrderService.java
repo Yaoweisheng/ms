@@ -49,4 +49,8 @@ public interface OrderService {
     boolean pay(Integer id);
 
     boolean cancel(Integer id);
+
+    boolean cancel(Order order);
+
+    int getState(Integer id);
 }

@@ -18,4 +18,6 @@ public interface OrderDAO {
     int getOrderCount(Integer id, Integer sid, Integer uid, String name, Date startTime, Date endTime, Integer state);
 
     int updateState(Integer id, Integer state, Integer oldState);
+
+    int getState(Integer id);
 }
